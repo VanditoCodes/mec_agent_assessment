@@ -1,0 +1,104 @@
+HIIIIII!!!!!!!
+
+Thanks for the opportunity to attempt this assessment! If nothing else, this was really fun, and I got to learn a lot!
+
+SETUP AND INITIAL READ:
+
+- Read through the requirements and immediately found them somewhat familiar
+- Imported the dataset and had a look at its structure
+- Rendered a few images using matplotlib from the dataset and looked at the cadquery code
+
+DATASET AND COMPUTE
+
+- Intuitively felt that 147k samples was probably a LOT given the compute I had available (RTX 3050 mobile 4 gig/T4 on colab)
+- Decided to limit to about 10,000 samples from the 147k, given the time constraint
+- From the 10k samples, 8,737 were unique code strings whereas 2,333 were unique skeletons (stripped via regex)
+- The repeatability explains the fast loss convergence (discussed further below)
+
+
+
+MODEL ARCHITECTURE
+
+- Decided to use CLIP to convert images into embeddings, and then feed them into a model
+- To decide what model to use(was inclined towards GPT2), I first had to check how many tokens each sample had
+- Tokenized the data using the GPT2 Tokenizer
+- Evaluated distribution based on different percentiles
+- Checked how many were above 950 (since GPT2 has a context window of 1024 tokens, and CLIP's embeddings amount to 50 tokens per image, (if all patch tokens are used, which was what i implemented for the finetuning))
+- About 90% were below 950, so I collected data for only 10k samples with lengths below 950
+- Asked claude for potential alternatives, it suggested Qwen 2.5
+- Also tokenized using the Qwen's tokenizer - expected Qwen to compress the tokens but they didnt - increased them by 25%
+- Printed a sample and found out that Qwen tokenizes each digit individually (i.e 54.43 -> 5 tokens whereas GPT2 treats the same input as 3 tokens)
+-> This meant that Qwen could greatly benefit from rounding off digits as it would reduce the number of tokens required significantly (as the CadQuery dataset's code had numerical values with extremely long decimal places, for example: oop1=wp_sketch1.moveTo(0.1475328947368421, 0.0).lineTo(0.1475328947368421, 0.359375).lineTo(0.0, 0.359375).lineTo(0.0, 0.0).close())
+
+- Selected CLIP + GPT2 with only the pooled CLIP embedding as baseline
+- Originally wanted to train using LoRA, however Claude recommended that given GPT2 has never seen CadQuery and there is sufficient data, decided to implement full finetuning
+- Finetune by giving all patch tokens CLIP embeddings instead of just the pooled one to build spatial awareness of the geometry
+- Decided to pursue Qwen only if time permitted (tl;dr, it didnt :/ - but i will pursue this on my own time just so i can see what happens lol)
+
+
+TRAINING
+
+Ran on Colab free tier on the T4. 
+Batch size 8, accumulated gradients 4 for run A.
+Batch size 4, accumulated gradients 8 for run B. - this was because now I was passing 50 tokens for the image embedding instead of just 1, so memory was overflowing.
+
+Since dataset was small, only ran for 2 epochs. Learning rate = 5e-5 (Claude recommended)
+
+In full discretion, training code was assisted by claude, though I did make sure to write each line myself and made sure I understood what was happening.
+
+RESULTS 
+
+Both runs ran for 100 samples
+
+Run A
+
+CLIP + GPT2 with pooled CLIP embedding
+
+VSR     meanIoU     median IoU
+0.51    0.0338       0.00225
+
+......okay yeah, i know it looks bad 😭😭 (shoutout windows + .)
+
+Epoch 0 val loss  0.2468
+Epoch 1 val loss 0.2447
+
+
+Run B
+
+CLIP + GPT2 with patch tokens from CLIP embeddings
+VSR     meanIoU     median IoU
+1       0.0323      0.01749
+
+Epoch 0 val loss 0.2485
+Epoch 1 val loss 0.2461  
+
+so when i first saw this, i was so confused, because how is VSR 1?????
+
+mean IoU is about the same, median is better by a lot, but still overall too low so the model didn't learn anything in terms of geometry.
+
+But the VSR = 1 still very weird, so I printed unique instances that the model generated over 100 samples, and it gave me 7.
+Which means, that it cheated!!!!!!! It seems to have gamed VSR, it only learnt a few templates and just spits those out, and all are seemingly valid CadQuery so code wise its fine, but it doesnt actually describe IoU so that's still realllyyy low.
+
+The skeleton diversity (2333 templates) i suppose in some ways predicted the collapse, which could also explain the idential cal losses and only 7 unique outputs.
+
+- Note: I also noticed that I did not set eos_token_id for generating samples during run A, so I corrected that and regenerated the VSR
+
+POTENTIAL BOTTLENECKS 
+
+- single view may not be enough for more complicated geometries
+- just VSR is gameable!!!! which is why iou is important! reporting VSR alone wouldve shown the model doubling in performance in runB but there was no meaningful improvement
+- compute - probably my biggest bottleneck, i wouldve loved to train on a larger model with more data for longer
+
+WITH MORE TIME
+
+- As mentioned, wouldve trained on the entire dataset for longer
+- Would try Qwen(coder) + LoRA
+- To check if the model is learning sufficiently from the image, wouldve also tried setting CLIP embedding to none, just to see how the model responds
+- A dataset with more views potentially
+- Full scale Qwen VL (not chosen here due to compute)
+
+In conclusion:
+
+I had a lot of fun with this exercise, and I got to learn a lot!!! It just validated how interesting this problem is, and I would love to continue to work on it. No matter how the assessment is judged, I will be trying Qwen on my own time, or expand to other models to get deeper insight at the problem MecAgent is trying to solve. 
+
+Would love to have a discussion over my experience as a Mechanical Engineer, and everything I learnt today!!!
