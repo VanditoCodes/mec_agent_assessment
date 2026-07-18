@@ -1,1 +1,1 @@
-### Everything is explained in the good_luck.ipynb file.
+### Go to readme_results
